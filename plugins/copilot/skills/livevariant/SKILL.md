@@ -50,7 +50,7 @@ shape decides which variant fields you fill and which URLs you hand out.
 | ------------------- | ---------------- | ---------------------------------------------------------------------------- |
 | **Email / image**   | `image` (+ optional `url` click destination) | The `serveNoAutoContext` URL in an `<img>`, the `clickNoAutoContext` URL around it, the pixel for conversions |
 | **Page redirect**   | `url` per variant | ONE serve URL that 302s each visitor to their sticky page; ideal for ads, bio links, QR codes |
-| **Website content** | `text` / `html` / `md` | The encoded config, served on the page through the SDK or the tag (see "Running a test on a website") |
+| **Website content** | `text` / `html` / `md` | The encoded config, served on the page through the SDK or the tag: `build_test` returns the install as `sdkSnippet` and no serve URL, since a redirect cannot carry inline content (see "Running a test on a website") |
 
 Mixing fields is allowed (a variant with both `image` and `url` serves the
 image and clicks through to the url), but keep one shape per test unless you
@@ -269,7 +269,8 @@ You are often the same agent that edits the site's code, so run the whole
 loop yourself instead of handing snippets to a human:
 
 1. `build_test` with `text` (or `html`/`md`) variants; keep the returned
-   `config` (the encoded string).
+   `config` (the encoded string). The response's `sdkSnippet` has steps
+   2 and 3 pre-filled for this exact test.
 2. Put the tag in `<head>` once:
    `<script defer src="https://livevariant.com/sdk.js" data-publishable-key="pk_..."></script>`
    The tag sets the page config (`window.livevariant = { config, sdk }`),

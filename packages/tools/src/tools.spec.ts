@@ -205,12 +205,55 @@ describe("build_test", () => {
 
   it("warns when a variant cannot be served by redirect", async () => {
     // The trap: mixing inline and redirect variants makes the serve URL
-    // 400 for EVERYONE, not just for that variant.
+    // 400 for EVERYONE, not just for that variant. The URLs still come
+    // back: the fix is a url on that variant, and the links then work.
     const out = await buildTest.handler(
       { variants: [{ url: A }, { text: "Buy now" }] },
       ctx
     );
     expect(out.warnings.join(" ")).toMatch(/cannot be served by redirect/i);
+    expect(out.urls.serve).toBe(`https://livevariant.link/s/${out.config}`);
+    expect(out.sdkSnippet).toBeUndefined();
+  });
+
+  it("hands a content-only test its SDK snippet instead of serve links", async () => {
+    // Inline variants have no redirect target, so /s can never succeed
+    // for them: returning that URL in the same shape as a redirect
+    // test's was a trap (#64). The SDK is the serving path, so the
+    // response carries that install instead, encoded config inlined.
+    const out = await buildTest.handler(
+      {
+        slots: {
+          headline: [{ text: "Ship faster" }, { text: "Ship safer" }],
+          body: [{ html: "<p>A</p>" }, { html: "<p>B</p>" }]
+        },
+        publishableKey: "pk_abcdefghijklmnopqrstuvwx"
+      },
+      ctx
+    );
+    expect(out.urls.serve).toBeUndefined();
+    expect(out.urls.serveNoAutoContext).toBeUndefined();
+    expect(out.slotLinks).toBeUndefined();
+    expect(out.emailTemplate).toBeUndefined();
+    // Click and pixel never look at url/image; manage is always there.
+    expect(out.urls.click).toBe(`https://livevariant.link/c/${out.config}`);
+    expect(out.urls.pixel).toBe(`https://livevariant.link/px/${out.config}`);
+    expect(out.urls.manage).toContain(`#${out.statsSecret}`);
+    // Nothing broken is being advertised, so nothing to warn about.
+    expect(out.warnings.join(" ")).not.toMatch(/400|cannot be served/i);
+    expect(out.sdkSnippet).toContain(
+      '<script defer src="https://livevariant.link/sdk.js" ' +
+        'data-publishable-key="pk_abcdefghijklmnopqrstuvwx"></script>'
+    );
+    expect(out.sdkSnippet).toContain(
+      `window.livevariant.sdk.createTest("${out.config}")`
+    );
+    expect(out.sdkSnippet).toContain(
+      'document.querySelector("#headline").textContent = test.slots.headline.text;'
+    );
+    expect(out.sdkSnippet).toContain(
+      'document.querySelector("#body").innerHTML = test.slots.body.html;'
+    );
   });
 
   it("builds an ESP template from one shared config string", async () => {
@@ -307,6 +350,33 @@ describe("inspect_test", () => {
     expect(
       out.findings.some(
         f => f.level === "error" && /never be read/.test(f.message)
+      )
+    ).toBe(true);
+  });
+
+  it("tells an SDK-served slot apart from a broken redirect slot", async () => {
+    // All-inline is a shape the SDK serves; calling its missing serve
+    // link an error was misleading (#90). Mixed really is broken.
+    const content = await buildTest.handler(
+      { variants: [{ text: "Ship faster" }, { text: "Ship safer" }] },
+      ctx
+    );
+    const served = await inspectTest.handler({ test: content.config }, ctx);
+    expect(served.findings.some(f => f.level === "error")).toBe(false);
+    expect(
+      served.findings.some(
+        f => f.level === "note" && /served by the SDK/.test(f.message)
+      )
+    ).toBe(true);
+
+    const mixed = await buildTest.handler(
+      { variants: [{ url: A }, { text: "Buy now" }] },
+      ctx
+    );
+    const broken = await inspectTest.handler({ test: mixed.config }, ctx);
+    expect(
+      broken.findings.some(
+        f => f.level === "error" && /return 400/.test(f.message)
       )
     ).toBe(true);
   });

@@ -476,10 +476,7 @@ export function createApi(options: ApiOptions): Hono {
     }
     const shell = await options.spaFetch(c.req.raw);
     const page = canonicalOrigin
-      ? await withCanonical(
-          shell,
-          canonicalUrlFor(canonicalOrigin, basePath, c.req.url)
-        )
+      ? await withCanonical(shell, canonicalUrlFor(canonicalOrigin, c.req.url))
       : new Response(shell.body, shell);
     page.headers.append("link", AGENT_LINKS);
     return page;

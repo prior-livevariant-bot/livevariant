@@ -1447,10 +1447,7 @@ export function createApp(options: AppOptions): Hono {
     // Same shell, one address per route: see canonical.ts.
     const canonicalOrigin = canonicalOriginOf(options.appUrl);
     return canonicalOrigin
-      ? withCanonical(
-          page,
-          canonicalUrlFor(canonicalOrigin, basePath, c.req.url)
-        )
+      ? withCanonical(page, canonicalUrlFor(canonicalOrigin, c.req.url))
       : page;
   });
 

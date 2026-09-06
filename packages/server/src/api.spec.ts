@@ -813,6 +813,32 @@ describe("agent discovery well-knowns", () => {
     expect(markdown.headers.get("content-type")).toContain("text/markdown");
   });
 
+  it("keeps a mounted deployment's prefix once in its canonical addresses", async () => {
+    const mounted = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      appUrl: "https://dashboard.example",
+      basePath: "/lv",
+      spaFetch: async () =>
+        new Response("<html><head></head><body>shell</body></html>", {
+          headers: { "content-type": "text/html" }
+        })
+    });
+    const html = await mounted.request("https://serve.example/lv/", {
+      headers: { accept: "text/html" }
+    });
+    expect(html.status).toBe(200);
+    expect(await html.text()).toContain(
+      '<link rel="canonical" href="https://dashboard.example/lv/" />'
+    );
+    const xml = await (
+      await mounted.request("https://serve.example/lv/sitemap.xml")
+    ).text();
+    expect(xml).toContain("<loc>https://dashboard.example/lv/</loc>");
+    expect(xml).toContain("<loc>https://dashboard.example/lv/builder</loc>");
+    expect(xml).not.toContain("/lv/lv");
+  });
+
   it("leaves the shell alone when no appUrl is configured", async () => {
     const oneDomain = createApp({
       store: new MemoryStore(),

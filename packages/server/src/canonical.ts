@@ -30,15 +30,12 @@ export function canonicalOriginOf(appUrl: string | undefined): string | null {
  * The canonical URL of a request: its path on the canonical origin,
  * query dropped (the shell's routes are paths; a query never names a
  * different page). The path stays percent-encoded as the URL parser
- * left it.
+ * left it, and it already carries any base path the app is mounted
+ * under, since that is how the request reached the app at all; the
+ * origin is the only part that changes.
  */
-export function canonicalUrlFor(
-  origin: string,
-  basePath: string,
-  requestUrl: string
-): string {
-  const path = new URL(requestUrl).pathname;
-  return `${origin}${basePath}${path}`;
+export function canonicalUrlFor(origin: string, requestUrl: string): string {
+  return `${origin}${new URL(requestUrl).pathname}`;
 }
 
 /**

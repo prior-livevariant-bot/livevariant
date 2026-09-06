@@ -277,15 +277,15 @@ describe("build_test", () => {
       'else if (test.slots.hero.text !== undefined) document.querySelector("#hero").textContent = test.slots.hero.text;'
     );
     // A slot name that is not an identifier is still addressed, and the
-    // markdown branch names the renderer the page has to supply.
+    // markdown branch goes through the renderer the page has to supply.
     expect(lines).toContain(
-      'if (test.slots["aside-note"].text !== undefined) document.querySelector("#aside-note").textContent = test.slots["aside-note"].text;'
+      'if (test.slots["aside-note"].md !== undefined) document.querySelector("#aside-note").innerHTML = renderMarkdown(test.slots["aside-note"].md);'
     );
     expect(lines).toContain(
-      'else if (test.slots["aside-note"].md !== undefined) { /* test.slots["aside-note"].md is markdown: render it with the page\'s own renderer. */ }'
+      'else if (test.slots["aside-note"].text !== undefined) document.querySelector("#aside-note").textContent = test.slots["aside-note"].text;'
     );
-    // The whole thing parses as a script body, so the markdown branch
-    // cannot have swallowed the next slot's line.
+    // The whole thing parses as a script body, so no branch can have
+    // swallowed the next slot's line.
     const body = lines.slice(lines.indexOf("") + 1).join("\n");
     expect(() => new Function(`(async () => {${body}})`)).not.toThrow();
     // A uniform slot keeps the one-line form.
@@ -297,6 +297,62 @@ describe("build_test", () => {
       'document.querySelector("#main").textContent = test.slots.main.text;'
     );
     expect(uniform.sdkSnippet).not.toContain("if (");
+    // No markdown anywhere, no renderer to point at.
+    expect(uniform.sdkSnippet).not.toContain("renderMarkdown");
+  });
+
+  it("places a markdown variant, as its source until the page supplies a renderer", async () => {
+    // The SDK hands markdown back unrendered and the page's renderer is
+    // not ours to know. A branch that did nothing left the default in
+    // place for every markdown visitor, so the placeholder shows the
+    // source instead, and the agent points it at the real renderer.
+    const out = await buildTest.handler(
+      {
+        slots: {
+          headline: [{ markdown: "# A" }, { markdown: "# B & <C>" }],
+          "aside-note": [{ text: "a" }, { markdown: "*b*" }]
+        }
+      },
+      ctx
+    );
+    const lines = (out.sdkSnippet ?? "").split("\n").map(l => l.trim());
+    expect(lines).toContain(
+      'document.querySelector("#headline").innerHTML = renderMarkdown(test.slots.headline.md);'
+    );
+    const body = lines.slice(lines.indexOf("") + 1).join("\n");
+    const run = async (slots: Record<string, unknown>) => {
+      const els: Record<string, { textContent?: string; innerHTML?: string }> =
+        { "#headline": {}, "#aside-note": {} };
+      const document = {
+        documentElement: { classList: { remove: () => undefined } },
+        querySelector: (sel: string) => els[sel]
+      };
+      const window = {
+        livevariant: { sdk: { createTest: async () => ({ slots }) } }
+      };
+      const fn = new Function(
+        "window",
+        "document",
+        `return (async () => {${body}})();`
+      );
+      await fn(window, document);
+      return els;
+    };
+    // Both visitors get their variant: the markdown one as escaped
+    // source, the text one as text.
+    const md = await run({
+      headline: { md: "# B & <C>" },
+      "aside-note": { md: "*b*" }
+    });
+    expect(md["#headline"].innerHTML).toBe("# B &amp; &lt;C&gt;");
+    expect(md["#aside-note"].innerHTML).toBe("*b*");
+    expect(md["#aside-note"].textContent).toBeUndefined();
+    const text = await run({
+      headline: { md: "# A" },
+      "aside-note": { text: "a" }
+    });
+    expect(text["#aside-note"].textContent).toBe("a");
+    expect(text["#aside-note"].innerHTML).toBeUndefined();
   });
 
   it("cloaks the tested elements until the swap, and never past a failure", async () => {

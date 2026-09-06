@@ -354,6 +354,13 @@ loop yourself instead of handing snippets to a human:
    2 s regardless (1 s proved too short: the failsafe fired, then the
    swap flipped the page anyway); the \`finally\` above removes it as soon
    as the swap has run, or failed. \`sdkSnippet\` carries all of this.
+
+   \`md\` variants come back from \`createTest\` as markdown source: the SDK
+   does not render it, and the page's renderer is not ours to know. A
+   test with markdown variants gets a \`renderMarkdown\` placeholder in
+   \`sdkSnippet\` that shows the source as text; point it at the page's
+   own renderer (\`marked.parse\`, \`markdownit().render\`, ...) before the
+   test goes live, or use \`html\` variants and skip the renderer.
 4. Image tests on a page: prefer
    \`<img data-lv-src="{origin}/s/<config>">\` (the tag fills src with the
    identity attached: one fetch, no flicker); a bare \`src\` also works and is

@@ -207,6 +207,14 @@ const CLOAK_TIMEOUT_MS = 2000;
  * back the variant as built and a line that reads `.text` from an
  * html-only variant renders nothing.
  *
+ * Markdown is the one format the SDK hands back unrendered, and the
+ * page's renderer is not ours to know, so a test with markdown
+ * variants gets a `renderMarkdown` placeholder to point at it. The
+ * placeholder shows the source as text: a markdown visitor then sees
+ * their variant, unstyled, rather than the default (a branch that did
+ * nothing left the default in place, the flicker bug without the
+ * flicker).
+ *
  * The tested elements are cloaked until the swap: without that, every
  * visitor assigned a non-default variant reads the default first and
  * then watches it flip (measured at 0.4 s warm, 1.4 s cold in #84).
@@ -230,35 +238,41 @@ function sdkSnippet(
     const chosen = /^[a-z_][a-z0-9_]*$/.test(slot)
       ? `test.slots.${slot}`
       : `test.slots["${slot}"]`;
-    const markdown = `${chosen}.md is markdown: render it with the page's own renderer.`;
+    const target = `document.querySelector("#${slot}")`;
     const place = (format: "text" | "html" | "md"): string =>
       format === "html"
-        ? `document.querySelector("#${slot}").innerHTML = ${chosen}.html;`
+        ? `${target}.innerHTML = ${chosen}.html;`
         : format === "md"
-          ? `{ /* ${markdown} */ }`
-          : `document.querySelector("#${slot}").textContent = ${chosen}.text;`;
-    // html before text: a variant carrying both means the html is the
-    // richer rendering of the same content.
-    const formats = (["html", "text", "md"] as const).filter(f =>
+          ? `${target}.innerHTML = renderMarkdown(${chosen}.md);`
+          : `${target}.textContent = ${chosen}.text;`;
+    // Richest first: a variant carrying two of these means the earlier
+    // one is the fuller rendering of the same content.
+    const formats = (["html", "md", "text"] as const).filter(f =>
       variants.some(v => v[f] !== undefined)
     );
-    if (formats.length <= 1) {
-      const format = formats[0] ?? "text";
-      return [format === "md" ? `// ${markdown}` : place(format)];
-    }
-    // Each branch is a statement of its own (the markdown one an empty
-    // block), so no branch swallows the next slot's line as its body.
+    if (formats.length <= 1) return [place(formats[0] ?? "text")];
+    // Each branch is one statement, so none swallows the next slot's
+    // line as its body.
     return formats.map((format, i) => {
       const guard = `${chosen}.${format} !== undefined`;
       const prefix = i === 0 ? `if (${guard}) ` : `else if (${guard}) `;
       return prefix + place(format);
     });
   });
+  const markdown = entries.some(([, variants]) =>
+    variants.some(v => v.md !== undefined)
+  )
+    ? [
+        `// Markdown variants render through this: point it at the page's own renderer (marked.parse, markdownit().render, ...). Until then the source shows as text.`,
+        `const renderMarkdown = md => md.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);`
+      ]
+    : [];
   return [
     `<style>${cloaked} { visibility: hidden; }</style>`,
     `<script>document.documentElement.classList.add("lv-pending"); setTimeout(function () { ${uncloak}; }, ${CLOAK_TIMEOUT_MS});</script>`,
     `<script defer src="${serveOrigin}/sdk.js"${key}></script>`,
     ``,
+    ...markdown,
     `try {`,
     `  const test = await window.livevariant.sdk.createTest("${encoded}");`,
     ...render.map(line => `  ${line}`),

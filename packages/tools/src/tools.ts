@@ -186,6 +186,15 @@ function serveOriginOf(context: ToolContext, override?: string): string {
 }
 
 /**
+ * How long the tested elements stay hidden if createTest has not
+ * answered: after this the page shows its defaults and the swap, if it
+ * still comes, is visible. One second proved too short in the field
+ * (the failsafe fired, then the variant flipped in late, which is the
+ * bug again); two seconds kept every measured trace clean (#84).
+ */
+const CLOAK_TIMEOUT_MS = 2000;
+
+/**
  * The on-page install for a test only the SDK can serve, in the shape
  * the skill teaches: the tag once in <head>, then createTest with the
  * ENCODED config so the page serves exactly this test. The tag takes
@@ -197,6 +206,14 @@ function serveOriginOf(context: ToolContext, override?: string): string {
  * the property the chosen variant actually has, since the SDK hands
  * back the variant as built and a line that reads `.text` from an
  * html-only variant renders nothing.
+ *
+ * The tested elements are cloaked until the swap: without that, every
+ * visitor assigned a non-default variant reads the default first and
+ * then watches it flip (measured at 0.4 s warm, 1.4 s cold in #84).
+ * The class goes on <html> before first paint, the style hides only
+ * the tested selectors so the rest of the page renders, the swap
+ * reveals in `finally` so a failed createTest still shows the page,
+ * and a timer bounds the wait.
  */
 function sdkSnippet(
   serveOrigin: string,
@@ -205,6 +222,10 @@ function sdkSnippet(
   publishableKey?: string
 ): string {
   const key = publishableKey ? ` data-publishable-key="${publishableKey}"` : "";
+  const uncloak = `document.documentElement.classList.remove("lv-pending")`;
+  const cloaked = entries
+    .map(([slot]) => `html.lv-pending #${slot}`)
+    .join(", ");
   const render = entries.flatMap(([slot, variants]) => {
     const chosen = /^[a-z_][a-z0-9_]*$/.test(slot)
       ? `test.slots.${slot}`
@@ -234,10 +255,16 @@ function sdkSnippet(
     });
   });
   return [
+    `<style>${cloaked} { visibility: hidden; }</style>`,
+    `<script>document.documentElement.classList.add("lv-pending"); setTimeout(function () { ${uncloak}; }, ${CLOAK_TIMEOUT_MS});</script>`,
     `<script defer src="${serveOrigin}/sdk.js"${key}></script>`,
     ``,
-    `const test = await window.livevariant.sdk.createTest("${encoded}");`,
-    ...render
+    `try {`,
+    `  const test = await window.livevariant.sdk.createTest("${encoded}");`,
+    ...render.map(line => `  ${line}`),
+    `} finally {`,
+    `  ${uncloak};`,
+    `}`
   ].join("\n");
 }
 

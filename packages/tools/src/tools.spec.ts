@@ -269,7 +269,7 @@ describe("build_test", () => {
       },
       ctx
     );
-    const lines = (out.sdkSnippet ?? "").split("\n");
+    const lines = (out.sdkSnippet ?? "").split("\n").map(l => l.trim());
     expect(lines).toContain(
       'if (test.slots.hero.html !== undefined) document.querySelector("#hero").innerHTML = test.slots.hero.html;'
     );
@@ -297,6 +297,75 @@ describe("build_test", () => {
       'document.querySelector("#main").textContent = test.slots.main.text;'
     );
     expect(uniform.sdkSnippet).not.toContain("if (");
+  });
+
+  it("cloaks the tested elements until the swap, and never past a failure", async () => {
+    // The naive install paints the default, then flips it for every
+    // visitor assigned another variant (#84). The snippet hides only
+    // the tested selectors, from before first paint until createTest
+    // has answered, or failed, or run out of time.
+    const out = await buildTest.handler(
+      {
+        slots: {
+          headline: [{ text: "A" }, { text: "B" }],
+          "aside-note": [{ html: "<p>a</p>" }, { html: "<p>b</p>" }]
+        }
+      },
+      ctx
+    );
+    const [head, body] = (out.sdkSnippet ?? "").split("\n\n");
+    expect(head).toContain(
+      "<style>html.lv-pending #aside-note, html.lv-pending #headline { visibility: hidden; }</style>"
+    );
+    expect(head).toContain(
+      '<script>document.documentElement.classList.add("lv-pending"); ' +
+        'setTimeout(function () { document.documentElement.classList.remove("lv-pending"); }, 2000);</script>'
+    );
+    // Style and inline script precede the tag: the class is on <html>
+    // before the SDK, let alone the swap, can run.
+    expect(head.indexOf("<style>")).toBeLessThan(head.indexOf("<script>"));
+    expect(head.indexOf("<script>")).toBeLessThan(
+      head.indexOf("<script defer")
+    );
+
+    // Run the body against a stub page, once with createTest resolving
+    // and once with it rejecting: the swap lands in the first case, and
+    // the cloak comes off in both.
+    const run = async (createTest: () => Promise<unknown>) => {
+      const classes = new Set(["lv-pending"]);
+      const els: Record<string, { textContent?: string; innerHTML?: string }> =
+        { "#headline": {}, "#aside-note": {} };
+      const document = {
+        documentElement: {
+          classList: { remove: (c: string) => classes.delete(c) }
+        },
+        querySelector: (sel: string) => els[sel]
+      };
+      const window = { livevariant: { sdk: { createTest } } };
+      const fn = new Function(
+        "window",
+        "document",
+        `return (async () => {${body}})();`
+      );
+      const outcome = await fn(window, document).then(
+        () => "resolved",
+        () => "rejected"
+      );
+      return { outcome, classes, els };
+    };
+    const ok = await run(async () => ({
+      slots: { headline: { text: "B" }, "aside-note": { html: "<p>b</p>" } }
+    }));
+    expect(ok.outcome).toBe("resolved");
+    expect(ok.els["#headline"].textContent).toBe("B");
+    expect(ok.els["#aside-note"].innerHTML).toBe("<p>b</p>");
+    expect(ok.classes.has("lv-pending")).toBe(false);
+    const failed = await run(async () => {
+      throw new Error("offline");
+    });
+    expect(failed.outcome).toBe("rejected");
+    expect(failed.els["#headline"].textContent).toBeUndefined();
+    expect(failed.classes.has("lv-pending")).toBe(false);
   });
 
   it("builds an ESP template from one shared config string", async () => {

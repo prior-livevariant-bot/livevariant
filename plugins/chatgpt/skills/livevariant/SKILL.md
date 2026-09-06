@@ -283,8 +283,12 @@ loop yourself instead of handing snippets to a human:
    included), never a lookalike rebuilt from slots:
 
    ```js
-   const test = await window.livevariant.sdk.createTest("<encoded>");
-   document.querySelector("#headline").textContent = test.slots.headline.text;
+   try {
+     const test = await window.livevariant.sdk.createTest("<encoded>");
+     document.querySelector("#headline").textContent = test.slots.headline.text;
+   } finally {
+     document.documentElement.classList.remove("lv-pending");
+   }
    ```
 
    Bundled apps use `npm i @livevariant/sdk` and the same call
@@ -292,6 +296,16 @@ loop yourself instead of handing snippets to a human:
    needed, and without it pass `{ serverUrl }`. `createTest` waits briefly
    for a tag-manager-loaded tag on its own, so load order is not your
    problem.
+
+   Hide the tested elements until then, or every visitor assigned a
+   non-default variant reads the default first and watches it flip
+   (`createTest` takes a round trip: measured at ~0.4 s warm, ~1.4 s
+   cold). Before the tag, in `<head>`: a style that hides ONLY the
+   tested selectors while `<html>` carries `lv-pending`, an inline
+   script that adds the class (before first paint) and removes it after
+   2 s regardless (1 s proved too short: the failsafe fired, then the
+   swap flipped the page anyway); the `finally` above removes it as soon
+   as the swap has run, or failed. `sdkSnippet` carries all of this.
 4. Image tests on a page: prefer
    `<img data-lv-src="https://livevariant.com/s/<config>">` (the tag fills src with the
    identity attached: one fetch, no flicker); a bare `src` also works and is

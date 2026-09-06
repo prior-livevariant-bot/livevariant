@@ -190,9 +190,13 @@ function serveOriginOf(context: ToolContext, override?: string): string {
  * the skill teaches: the tag once in <head>, then createTest with the
  * ENCODED config so the page serves exactly this test. The tag takes
  * its serverUrl from wherever it was loaded, so the serve origin rides
- * on the script src and createTest needs no options. One line per slot
- * shows where the chosen variant's content lands; the property named
- * is the first inline format the slot's variants carry.
+ * on the script src and createTest needs no options. Then, per slot,
+ * where the chosen variant's content lands. A slot whose variants all
+ * carry the same inline format gets one line; a slot that mixes them
+ * (one variant text, another html) gets a line per format, guarded on
+ * the property the chosen variant actually has, since the SDK hands
+ * back the variant as built and a line that reads `.text` from an
+ * html-only variant renders nothing.
  */
 function sdkSnippet(
   serveOrigin: string,
@@ -201,19 +205,33 @@ function sdkSnippet(
   publishableKey?: string
 ): string {
   const key = publishableKey ? ` data-publishable-key="${publishableKey}"` : "";
-  const render = entries.map(([slot, variants]) => {
-    const format =
-      (["text", "html", "md"] as const).find(f =>
-        variants.some(v => v[f] !== undefined)
-      ) ?? "text";
+  const render = entries.flatMap(([slot, variants]) => {
     const chosen = /^[a-z_][a-z0-9_]*$/.test(slot)
-      ? `test.slots.${slot}.${format}`
-      : `test.slots["${slot}"].${format}`;
-    return format === "html"
-      ? `document.querySelector("#${slot}").innerHTML = ${chosen};`
-      : format === "md"
-        ? `// ${chosen} is markdown: render it with the page's own renderer.`
-        : `document.querySelector("#${slot}").textContent = ${chosen};`;
+      ? `test.slots.${slot}`
+      : `test.slots["${slot}"]`;
+    const markdown = `${chosen}.md is markdown: render it with the page's own renderer.`;
+    const place = (format: "text" | "html" | "md"): string =>
+      format === "html"
+        ? `document.querySelector("#${slot}").innerHTML = ${chosen}.html;`
+        : format === "md"
+          ? `{ /* ${markdown} */ }`
+          : `document.querySelector("#${slot}").textContent = ${chosen}.text;`;
+    // html before text: a variant carrying both means the html is the
+    // richer rendering of the same content.
+    const formats = (["html", "text", "md"] as const).filter(f =>
+      variants.some(v => v[f] !== undefined)
+    );
+    if (formats.length <= 1) {
+      const format = formats[0] ?? "text";
+      return [format === "md" ? `// ${markdown}` : place(format)];
+    }
+    // Each branch is a statement of its own (the markdown one an empty
+    // block), so no branch swallows the next slot's line as its body.
+    return formats.map((format, i) => {
+      const guard = `${chosen}.${format} !== undefined`;
+      const prefix = i === 0 ? `if (${guard}) ` : `else if (${guard}) `;
+      return prefix + place(format);
+    });
   });
   return [
     `<script defer src="${serveOrigin}/sdk.js"${key}></script>`,

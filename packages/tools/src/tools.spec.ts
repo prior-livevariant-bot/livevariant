@@ -256,6 +256,49 @@ describe("build_test", () => {
     );
   });
 
+  it("places every inline format a mixed slot carries, not just the first", async () => {
+    // One variant is text, the other html: the SDK hands back whichever
+    // variant it chose, so a snippet that reads `.text` from both would
+    // render nothing for the html visitor.
+    const out = await buildTest.handler(
+      {
+        slots: {
+          hero: [{ text: "Plain" }, { html: "<em>Rich</em>" }],
+          "aside-note": [{ markdown: "*a*" }, { text: "b" }]
+        }
+      },
+      ctx
+    );
+    const lines = (out.sdkSnippet ?? "").split("\n");
+    expect(lines).toContain(
+      'if (test.slots.hero.html !== undefined) document.querySelector("#hero").innerHTML = test.slots.hero.html;'
+    );
+    expect(lines).toContain(
+      'else if (test.slots.hero.text !== undefined) document.querySelector("#hero").textContent = test.slots.hero.text;'
+    );
+    // A slot name that is not an identifier is still addressed, and the
+    // markdown branch names the renderer the page has to supply.
+    expect(lines).toContain(
+      'if (test.slots["aside-note"].text !== undefined) document.querySelector("#aside-note").textContent = test.slots["aside-note"].text;'
+    );
+    expect(lines).toContain(
+      'else if (test.slots["aside-note"].md !== undefined) { /* test.slots["aside-note"].md is markdown: render it with the page\'s own renderer. */ }'
+    );
+    // The whole thing parses as a script body, so the markdown branch
+    // cannot have swallowed the next slot's line.
+    const body = lines.slice(lines.indexOf("") + 1).join("\n");
+    expect(() => new Function(`(async () => {${body}})`)).not.toThrow();
+    // A uniform slot keeps the one-line form.
+    const uniform = await buildTest.handler(
+      { variants: [{ text: "A" }, { text: "B" }] },
+      ctx
+    );
+    expect(uniform.sdkSnippet).toContain(
+      'document.querySelector("#main").textContent = test.slots.main.text;'
+    );
+    expect(uniform.sdkSnippet).not.toContain("if (");
+  });
+
   it("builds an ESP template from one shared config string", async () => {
     const out = await twoVariantTest();
     const { imageSrc, linkHref } = out.emailTemplate.main;
